@@ -1,0 +1,6 @@
+@webapi_restful_backend_pulpi_HostAddress = http://localhost:5266
+
+GET {{webapi_restful_backend_pulpi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
