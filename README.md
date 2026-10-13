@@ -201,3 +201,128 @@ flowchart TD
 ```
 
 El cálculo definitivo del efectivo esperado debe seguir la fórmula implementada en el backend, considerando el saldo inicial y los movimientos que afectan al efectivo.
+
+## Requisitos previos
+
+Antes de ejecutar Pulpi, verifica que tengas instalado:
+
+- .NET SDK compatible con .NET 10.
+- SQL Server.
+- Git.
+- Un editor de código, como Visual Studio o Visual Studio Code.
+
+## Instalación
+
+### 1. Clonar el repositorio
+
+```bash
+git clone https://github.com/angelbarreto46u/webapi-restful-backend-pulpi.git
+cd webapi-restful-backend-pulpi
+```
+
+### 2. Restaurar dependencias
+
+```bash
+dotnet restore
+```
+
+### 3. Configurar la conexión a SQL Server
+
+Configura la cadena de conexión `ConnectionStrings:DefaultConnection` de acuerdo con tu instancia de SQL Server.
+
+No publiques contraseñas ni credenciales reales en el repositorio. Para el entorno de desarrollo, puedes utilizar User Secrets o variables de entorno.
+
+### 4. Configurar JWT
+
+La API necesita una clave secreta para firmar los tokens JWT. Utiliza una clave aleatoria segura de al menos 32 bytes y mantenla fuera del control de versiones.
+
+Si el proyecto utiliza la configuración `Jwt:Key`, `Jwt:Issuer` y `Jwt:Audience`, puedes definir los valores mediante User Secrets:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "Jwt:Key" "REEMPLAZAR_POR_UN_SECRETO_SEGURO"
+dotnet user-secrets set "Jwt:Issuer" "Pulpi"
+dotnet user-secrets set "Jwt:Audience" "PulpiFrontend"
+```
+
+Los valores del emisor y de la audiencia deben coincidir con los configurados en la aplicación. No utilices literalmente los valores de ejemplo sin verificar la configuración del proyecto.
+
+### 5. Aplicar las migraciones
+
+Antes de ejecutar migraciones sobre una base de datos que contenga información importante, realiza un respaldo.
+
+Si el proyecto utiliza Entity Framework Core y las migraciones están configuradas:
+
+```bash
+dotnet ef database update
+```
+
+Si el comando `dotnet ef` no está disponible, instala una versión compatible con la versión de Entity Framework Core utilizada por el proyecto.
+
+**Advertencia:** revisa las migraciones antes de aplicarlas. Una migración que elimina tablas o columnas puede provocar pérdida de información.
+
+### 6. Ejecutar el backend
+
+```bash
+dotnet run
+```
+
+Consulta la consola y `Properties/launchSettings.json` para identificar el puerto y el protocolo configurados.
+
+## Swagger / OpenAPI
+
+Swagger permite consultar los endpoints publicados por la API, revisar sus parámetros y probar solicitudes.
+
+Si la documentación está habilitada en el entorno de desarrollo, accede a la ruta `/swagger` de la URL indicada por la aplicación.
+
+### Probar endpoints protegidos
+
+1. Ejecuta el endpoint de inicio de sesión.
+2. Obtén el token JWT de la respuesta.
+3. Abre el mecanismo de autorización de Swagger.
+4. Introduce el token según el esquema Bearer configurado.
+5. Ejecuta el endpoint que deseas probar.
+
+Los endpoints públicos deben funcionar sin autenticación. Los endpoints protegidos deben validar el token y los permisos correspondientes.
+
+## Ejemplo de solicitud autenticada
+
+```http
+GET /api/Auth/me HTTP/1.1
+Host: localhost:5266
+Authorization: Bearer <TOKEN_JWT>
+Accept: application/json
+```
+
+Ejemplo equivalente con `curl`:
+
+```bash
+curl -X GET "http://localhost:5266/api/Auth/me" \
+  -H "Authorization: Bearer <TOKEN_JWT>" \
+  -H "Accept: application/json"
+```
+
+El endpoint y el puerto anteriores son ejemplos que debes contrastar con las rutas y la configuración reales del proyecto.
+
+## Integración con el frontend
+
+El frontend de Pulpi debe enviar solicitudes HTTP a la URL base de la API.
+
+Para integrar ambos proyectos:
+
+- Configura la URL base del backend en el frontend.
+- Envía los datos en el formato definido por los DTOs.
+- Incluye el token JWT en las solicitudes protegidas.
+- Gestiona las respuestas de validación y los códigos HTTP.
+- Configura CORS para autorizar el origen del frontend.
+- No confíes en el frontend para aplicar permisos de seguridad.
+
+## Migraciones y datos existentes
+
+Antes de actualizar el esquema:
+
+1. Revisa las migraciones pendientes.
+2. Identifica operaciones destructivas.
+3. Crea un respaldo de la base de datos.
+4. Aplica los cambios en un entorno de desarrollo.
+5. Verifica las tablas y las operaciones principales antes de actualizar producción.
