@@ -326,3 +326,126 @@ Antes de actualizar el esquema:
 3. Crea un respaldo de la base de datos.
 4. Aplica los cambios en un entorno de desarrollo.
 5. Verifica las tablas y las operaciones principales antes de actualizar producción.
+
+## Seguridad
+
+Pulpi debe aplicar controles de seguridad en el backend para proteger la información de los usuarios y la integridad de las operaciones financieras.
+
+### Autenticación y autorización
+- Utilizar JWT Bearer para autenticar las solicitudes protegidas.
+- Validar la firma y la expiración del token.
+- Verificar el estado de la cuenta y los permisos necesarios para la operación.
+- Restringir el acceso a los recursos según el rol y la propiedad de los datos.
+- No permitir que un usuario se otorgue privilegios administrativos mediante el registro público.
+
+### Protección de credenciales
+- Almacenar contraseñas mediante un algoritmo de hash seguro, como BCrypt.
+- No almacenar contraseñas en texto plano.
+- Mantener las claves JWT y las credenciales de la base de datos fuera del repositorio.
+- Utilizar HTTPS en entornos distintos del desarrollo local.
+
+### Integridad financiera
+- Validar los montos y los datos recibidos por la API.
+- Comprobar que la sesión de caja esté abierta cuando la operación lo requiera.
+- Evitar modificaciones no autorizadas de transacciones.
+- Conservar la trazabilidad de los movimientos anulados.
+- Registrar las operaciones administrativas relevantes.
+
+## Auditoría
+
+El sistema contempla un registro de acciones para facilitar la trazabilidad de operaciones relevantes.
+
+La auditoría permite investigar qué acción se ejecutó, cuándo ocurrió y qué usuario la realizó, siempre que esos datos estén registrados por la implementación.
+
+Los registros de auditoría deben protegerse contra modificaciones no autorizadas y no deben utilizarse para almacenar contraseñas, tokens completos ni otros secretos.
+
+## Control de caja
+
+El flujo operativo de caja comprende la apertura de una sesión, el registro de movimientos y el cierre.
+
+### Apertura
+1. Validar la identidad y los permisos del usuario.
+2. Comprobar las reglas para iniciar una nueva sesión.
+3. Registrar el monto inicial y la fecha de apertura.
+4. Asociar los movimientos posteriores con la sesión correspondiente.
+
+### Operación
+1. Validar cada movimiento.
+2. Verificar la categoría y la sesión aplicable.
+3. Registrar la transacción y su relación con el usuario.
+4. Mantener la consistencia de los datos financieros.
+
+### Cierre
+1. Recuperar los movimientos que afectan al efectivo.
+2. Calcular el efectivo esperado según las reglas del sistema.
+3. Registrar el efectivo declarado.
+4. Calcular y guardar la diferencia, cuando corresponda.
+5. Conservar la información necesaria para auditorías posteriores.
+
+## Manejo de errores
+
+La API debe utilizar códigos HTTP apropiados para comunicar el resultado de las solicitudes.
+
+| Código HTTP | Significado |
+|---|---|
+| `200 OK` | Solicitud procesada correctamente |
+| `201 Created` | Recurso creado |
+| `400 Bad Request` | Datos inválidos o solicitud incorrecta |
+| `401 Unauthorized` | Autenticación ausente o inválida |
+| `403 Forbidden` | Usuario autenticado sin permisos suficientes |
+| `404 Not Found` | Recurso no encontrado |
+| `409 Conflict` | Conflicto con el estado actual del recurso |
+| `500 Internal Server Error` | Error inesperado del servidor |
+
+Los códigos concretos dependen de cómo cada controlador gestione sus resultados y excepciones.
+
+## Estructura del proyecto
+
+La organización del repositorio puede consultarse directamente en sus directorios y archivos.
+
+```text
+webapi-restful-backend-pulpi/
+├── Controllers/
+├── DTOs/
+├── Data/
+├── Migrations/
+├── Models/
+├── Services/
+├── Properties/
+├── scripts/
+├── Program.cs
+├── appsettings.json
+└── webapi-restful-backend-pulpi.csproj
+```
+
+Descripción general:
+
+- **Controllers:** reciben las solicitudes HTTP y coordinan la ejecución de las operaciones.
+- **DTOs:** definen los datos de entrada y salida de la API.
+- **Data:** contiene el contexto y la configuración del acceso a datos.
+- **Migrations:** registra los cambios versionados del esquema de la base de datos.
+- **Models:** representa las entidades del dominio.
+- **Services:** agrupa servicios y operaciones de aplicación.
+- **Properties:** contiene configuración de ejecución local.
+- **scripts:** puede incluir scripts auxiliares para tareas administrativas.
+- **Program.cs:** configura los servicios y el pipeline de ASP.NET Core.
+- **appsettings.json:** contiene la configuración general de la aplicación.
+
+Esta estructura es descriptiva y debe ajustarse si los directorios reales del repositorio difieren.
+
+## Mantenimiento
+
+Para mantener el proyecto:
+
+- Revisa las dependencias y sus actualizaciones.
+- Verifica las migraciones antes de aplicarlas.
+- Ejecuta pruebas de autenticación, autorización y operaciones financieras.
+- Comprueba la apertura y el cierre de caja.
+- Mantén respaldos de la base de datos.
+- Revisa los logs y la auditoría ante errores de operación.
+
+## Repositorio
+
+Código fuente: https://github.com/angelbarreto46u/webapi-restful-backend-pulpi
+
+La documentación debe mantenerse alineada con las entidades, los DTOs, los controladores y las reglas de negocio implementadas en el código fuente.
