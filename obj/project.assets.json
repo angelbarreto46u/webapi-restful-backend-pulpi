@@ -3772,23 +3772,23 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\arbp1\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "C:\\Users\\orlan\\.nuget\\packages\\": {},
+    "A:\\Microsoft\\Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\arbp1\\OneDrive\\Desktop\\webapi-restful-backend-pulpi\\webapi-restful-backend-pulpi.csproj",
+      "projectUniqueName": "C:\\Users\\orlan\\webapi-restful-backend-pulpi\\webapi-restful-backend-pulpi.csproj",
       "projectName": "webapi-restful-backend-pulpi",
-      "projectPath": "C:\\Users\\arbp1\\OneDrive\\Desktop\\webapi-restful-backend-pulpi\\webapi-restful-backend-pulpi.csproj",
-      "packagesPath": "C:\\Users\\arbp1\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\arbp1\\OneDrive\\Desktop\\webapi-restful-backend-pulpi\\obj\\",
+      "projectPath": "C:\\Users\\orlan\\webapi-restful-backend-pulpi\\webapi-restful-backend-pulpi.csproj",
+      "packagesPath": "C:\\Users\\orlan\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\orlan\\webapi-restful-backend-pulpi\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        "A:\\Microsoft\\Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\Users\\arbp1\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\orlan\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
