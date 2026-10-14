@@ -44,6 +44,22 @@ builder.Services.AddAuthentication(options =>
     // un cambio de rol o la desactivación de una cuenta tenga efecto sin esperar a que expire el JWT.
     options.Events = new JwtBearerEvents
     {
+        OnMessageReceived = context =>
+        {
+            var authorization =
+            context.Request.Headers.Authorization.ToString();
+
+            if (string.IsNullOrWhiteSpace(authorization) &&
+                context.Request.Cookies.TryGetValue(
+                "pulpi_access_token",
+                out var cookieToken))
+            {
+                context.Token = cookieToken;
+            }
+
+            return Task.CompletedTask;
+        },
+
         OnTokenValidated = async context =>
         {
             var userIdClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -87,20 +103,24 @@ builder.Services.AddSwaggerGen(c =>
         Version = "v1",
         Description = "API RESTful del sistema financiero Pulpi. Los roles y los permisos se validan contra la base de datos."
     });
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    /*c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Name = "Authorization", Description = "Ingresa el token JWT sin escribir la palabra Bearer.",
-        In = ParameterLocation.Header, Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT"
+        Name = "Authorization",
+        Description = "Ingresa el token JWT sin escribir la palabra Bearer.",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
     });
     c.AddSecurityRequirement(document => new OpenApiSecurityRequirement
     {
         [new OpenApiSecuritySchemeReference("Bearer", document)] = new List<string>()
-    });
+    });*/
 });
 
 builder.Services.AddCors(options => options.AddPolicy("AllowReactApp", policy =>
     policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000")
-        .AllowAnyHeader().AllowAnyMethod()));
+        .AllowAnyHeader().AllowAnyMethod() .AllowCredentials()));
 
 var app = builder.Build();
 if (app.Environment.IsDevelopment())

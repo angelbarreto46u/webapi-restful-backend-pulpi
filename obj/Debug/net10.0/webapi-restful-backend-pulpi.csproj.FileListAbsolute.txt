@@ -340,3 +340,4 @@ C:\Users\arbp1\OneDrive\Desktop\webapi-restful-backend-pulpi\obj\Debug\net10.0\r
 C:\Users\arbp1\OneDrive\Desktop\webapi-restful-backend-pulpi\obj\Debug\net10.0\webapi-restful-backend-pulpi.pdb
 C:\Users\arbp1\OneDrive\Desktop\webapi-restful-backend-pulpi\obj\Debug\net10.0\webapi-restful-backend-pulpi.genruntimeconfig.cache
 C:\Users\arbp1\OneDrive\Desktop\webapi-restful-backend-pulpi\obj\Debug\net10.0\ref\webapi-restful-backend-pulpi.dll
+C:\Users\arbp1\OneDrive\Desktop\webapi-restful-backend-pulpi\obj\Debug\net10.0\webapi-restful-backend-pulpi.sourcelink.json
