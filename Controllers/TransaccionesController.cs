@@ -53,16 +53,28 @@ public sealed class TransaccionesController : ControllerBase
         await using var dbTransaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var category = await _context.Categorias.FirstOrDefaultAsync(c => c.IdCategoria == dto.CategoriaId && c.Activa);
         if (category is null) return BadRequest(new { message = "La categoría seleccionada no existe o está desactivada." });
-        if (!IsValidDate(dto.FechaMovimiento)) return BadRequest(new { message = "La fecha del movimiento no es válida o está demasiado adelantada." });
+        if (!IsTodayInNicaragua(dto.FechaMovimiento))
+        {
+            return BadRequest(new
+            {
+                message = "La fecha de una nueva transacción debe ser la fecha actual de Nicaragua."
+            });
+        }
 
         var session = await _context.SesionesCaja.FirstOrDefaultAsync(s => s.IdUsuarioApertura == userId && s.Estado == "ABIERTA");
         if (session is null) return Conflict(new { message = "Debes abrir una sesión de caja antes de registrar movimientos." });
 
         var transaction = new Transaccion
         {
-            Concepto = dto.Concepto.Trim(), IdCategoria = category.IdCategoria, Categoria = category,
-            Monto = dto.Monto, MetodoPago = dto.MetodoPago, FechaMovimiento = dto.FechaMovimiento,
-            FechaRegistro = DateTime.UtcNow, IdUsuarioRegistro = userId, IdSesionCaja = session.IdSesionCaja,
+            Concepto = dto.Concepto.Trim(),
+            IdCategoria = category.IdCategoria,
+            Categoria = category,
+            Monto = dto.Monto,
+            MetodoPago = dto.MetodoPago,
+            FechaMovimiento = GetNicaraguaToday(),
+            FechaRegistro = DateTime.UtcNow,
+            IdUsuarioRegistro = userId,
+            IdSesionCaja = session.IdSesionCaja,
             Estado = "REGISTRADA"
         };
 
@@ -89,7 +101,13 @@ public sealed class TransaccionesController : ControllerBase
 
         var category = await _context.Categorias.FirstOrDefaultAsync(c => c.IdCategoria == dto.CategoriaId && c.Activa);
         if (category is null) return BadRequest(new { message = "La categoría seleccionada no existe o está desactivada." });
-        if (!IsValidDate(dto.FechaMovimiento)) return BadRequest(new { message = "La fecha del movimiento no es válida o está demasiado adelantada." });
+        if (dto.FechaMovimiento.Date != transaction.FechaMovimiento.Date)
+        {
+            return BadRequest(new
+            {
+                message = "La fecha de una transacción registrada no se puede modificar."
+            });
+        }
 
         await using var dbTransaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var before = ToResponse(transaction);
@@ -99,7 +117,6 @@ public sealed class TransaccionesController : ControllerBase
         transaction.Categoria = category;
         transaction.Monto = dto.Monto;
         transaction.MetodoPago = dto.MetodoPago;
-        transaction.FechaMovimiento = dto.FechaMovimiento;
         AuditoriaHelper.Registrar(_context, userId, "Transacciones", transaction.Id, "ACTUALIZAR", before, ToResponse(transaction));
         await _context.SaveChangesAsync();
         await RecalculateClosedSessionAsync(affectedSessionId, userId);
@@ -133,28 +150,78 @@ public sealed class TransaccionesController : ControllerBase
         return NoContent();
     }
 
-    private async Task RecalculateClosedSessionAsync(long? sessionId, int userId)
+    private async Task RecalculateClosedSessionAsync(
+    long? sessionId,
+    int userId)
     {
-        if (!sessionId.HasValue) return;
-        var session = await _context.SesionesCaja.FirstOrDefaultAsync(s => s.IdSesionCaja == sessionId.Value && s.Estado == "CERRADA");
-        if (session is null || !session.SaldoDeclarado.HasValue) return;
+        if (!sessionId.HasValue)
+            return;
 
-        var before = new { session.SaldoEsperado, session.Diferencia };
-        var cashMovements = _context.Transacciones.Include(t => t.Categoria)
-            .Where(t => t.IdSesionCaja == session.IdSesionCaja && t.Estado == "REGISTRADA" && t.MetodoPago == "Efectivo");
-        var incomes = await cashMovements.Where(t => t.Categoria!.Tipo == "Ingreso").SumAsync(t => (decimal?)t.Monto) ?? 0m;
-        var expenses = await cashMovements.Where(t => t.Categoria!.Tipo == "Gasto").SumAsync(t => (decimal?)t.Monto) ?? 0m;
-        session.SaldoEsperado = session.SaldoInicial + incomes - expenses;
-        session.Diferencia = session.SaldoDeclarado.Value - session.SaldoEsperado.Value;
+        var session = await _context.SesionesCaja
+            .FirstOrDefaultAsync(s =>
+                s.IdSesionCaja == sessionId.Value &&
+                s.Estado == "CERRADA");
 
-        AuditoriaHelper.Registrar(_context, userId, "SesionesCaja", session.IdSesionCaja,
-            "RECALCULAR_CIERRE", before,
-            new { session.SaldoEsperado, session.Diferencia },
+        if (session is null)
+            return;
+
+        var before = new
+        {
+            session.SaldoEsperado
+        };
+
+        var cashMovements = _context.Transacciones
+            .Include(t => t.Categoria)
+            .Where(t =>
+                t.IdSesionCaja == session.IdSesionCaja &&
+                t.Estado == "REGISTRADA" &&
+                t.MetodoPago == "Efectivo");
+
+        var incomes = await cashMovements
+            .Where(t => t.Categoria!.Tipo == "Ingreso")
+            .SumAsync(t => (decimal?)t.Monto) ?? 0m;
+
+        var expenses = await cashMovements
+            .Where(t => t.Categoria!.Tipo == "Gasto")
+            .SumAsync(t => (decimal?)t.Monto) ?? 0m;
+
+        session.SaldoEsperado =
+            session.SaldoInicial + incomes - expenses;
+
+        AuditoriaHelper.Registrar(
+            _context,
+            userId,
+            "SesionesCaja",
+            session.IdSesionCaja,
+            "RECALCULAR_SALDO_ESPERADO",
+            before,
+            new
+            {
+                session.SaldoEsperado
+            },
             "El administrador corrigió o anuló un movimiento de una sesión ya cerrada.");
     }
 
     private bool TryGetUserId(out int userId) => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
     private static bool IsValidDate(DateTime date) => date != default && date <= DateTime.UtcNow.AddDays(1);
+    private static DateTime GetNicaraguaToday()
+    {
+        var timeZoneId = OperatingSystem.IsWindows()
+            ? "Central America Standard Time"
+            : "America/Managua";
+
+        var nicaraguaTimeZone =
+            TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+
+        return TimeZoneInfo
+            .ConvertTimeFromUtc(DateTime.UtcNow, nicaraguaTimeZone)
+            .Date;
+    }
+
+    private static bool IsTodayInNicaragua(DateTime date)
+    {
+        return date.Date == GetNicaraguaToday();
+    }
 
     private static object ToResponse(Transaccion t) => new
     {

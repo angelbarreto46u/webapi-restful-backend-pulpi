@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("webapi-restful-backend-pulpi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0780dfe33ef85e2b85395cf743237722baccb565")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+672ad69b431a30ad1120f0dedd4ae2e9265ed591")]
 [assembly: System.Reflection.AssemblyProductAttribute("webapi-restful-backend-pulpi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("webapi-restful-backend-pulpi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

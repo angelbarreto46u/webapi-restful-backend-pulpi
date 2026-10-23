@@ -26,9 +26,6 @@ public sealed class SesionCaja
     [Column(TypeName = "decimal(18,2)")]
     public decimal? SaldoDeclarado { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
-    public decimal? Diferencia { get; set; }
-
     [Required, MaxLength(10)]
     public string Estado { get; set; } = "ABIERTA";
 

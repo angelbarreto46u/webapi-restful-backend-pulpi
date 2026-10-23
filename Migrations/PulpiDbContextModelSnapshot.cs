@@ -17,7 +17,7 @@ namespace webapi_restful_backend_pulpi.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -157,9 +157,6 @@ namespace webapi_restful_backend_pulpi.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("IdSesionCaja"));
-
-                    b.Property<decimal?>("Diferencia")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Estado")
                         .IsRequired()

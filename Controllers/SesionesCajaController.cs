@@ -50,8 +50,10 @@ public sealed class SesionesCajaController : ControllerBase
 
         var session = new SesionCaja
         {
-            IdUsuarioApertura = userId, FechaHoraApertura = DateTime.UtcNow,
-            SaldoInicial = dto.SaldoInicial!.Value, Estado = "ABIERTA",
+            IdUsuarioApertura = userId,
+            FechaHoraApertura = DateTime.UtcNow,
+            SaldoInicial = dto.SaldoInicial!.Value,
+            Estado = "ABIERTA",
             Observaciones = string.IsNullOrWhiteSpace(dto.Observaciones) ? null : dto.Observaciones.Trim()
         };
         _context.SesionesCaja.Add(session);
@@ -80,23 +82,46 @@ public sealed class SesionesCajaController : ControllerBase
         var incomes = await movements.Where(t => t.Categoria!.Tipo == "Ingreso").SumAsync(t => (decimal?)t.Monto) ?? 0m;
         var expenses = await movements.Where(t => t.Categoria!.Tipo == "Gasto").SumAsync(t => (decimal?)t.Monto) ?? 0m;
         var expected = session.SaldoInicial + incomes - expenses;
-        var declaredBalance = dto.SaldoDeclarado!.Value;
         var before = ToResponse(session);
+
         session.IdUsuarioCierre = userId;
         session.FechaHoraCierre = DateTime.UtcNow;
+
+        // El saldo definitivo se calcula en el servidor.
         session.SaldoEsperado = expected;
-        session.SaldoDeclarado = declaredBalance;
-        session.Diferencia = declaredBalance - expected;
+        session.SaldoDeclarado = expected;
         session.Estado = "CERRADA";
+
         if (!string.IsNullOrWhiteSpace(dto.Observaciones))
+        {
             session.Observaciones = string.IsNullOrWhiteSpace(session.Observaciones)
                 ? dto.Observaciones.Trim()
                 : $"{session.Observaciones} | Cierre: {dto.Observaciones.Trim()}";
-        AuditoriaHelper.Registrar(_context, userId, "SesionesCaja", session.IdSesionCaja, "CERRAR", before,
-            new { session.FechaHoraCierre, session.SaldoEsperado, session.SaldoDeclarado, session.Diferencia, session.Estado, session.Observaciones });
+        }
+
+        AuditoriaHelper.Registrar(
+            _context,
+            userId,
+            "SesionesCaja",
+            session.IdSesionCaja,
+            "CERRAR",
+            before,
+            new
+            {
+                session.FechaHoraCierre,
+                session.SaldoEsperado,
+                session.SaldoDeclarado,
+                session.Estado,
+                session.Observaciones
+            });
+
         await _context.SaveChangesAsync();
         await dbTransaction.CommitAsync();
-        session.UsuarioCierre = await _context.Usuarios.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+
+        session.UsuarioCierre = await _context.Usuarios
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
         return Ok(ToResponse(session));
     }
 
@@ -114,7 +139,6 @@ public sealed class SesionesCajaController : ControllerBase
         s.FechaHoraCierre,
         s.SaldoEsperado,
         s.SaldoDeclarado,
-        s.Diferencia,
         s.Estado,
         s.Observaciones
     };
