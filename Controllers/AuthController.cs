@@ -635,8 +635,8 @@ public sealed class AuthController : ControllerBase
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = CookieSecure,
-                SameSite = SameSiteMode.Lax,
+                Secure = true,
+                SameSite = SameSiteMode.None,
                 Path = "/",
                 IsEssential = true,
                 Expires = DateTimeOffset.UtcNow.Add(TokenLifetime)

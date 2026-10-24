@@ -9,8 +9,18 @@ using webapi_restful_backend_pulpi.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
-builder.Services.AddDbContext<PulpiDbContext>(options =>
+/*builder.Services.AddDbContext<PulpiDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+*/
+
+builder.Services.AddDbContext<PulpiDbContext>(options =>
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        sqlOptions => sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(15),
+            errorNumbersToAdd: null)));
+
 
 var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException("No se encontró la clave JWT. Configúrela mediante User Secrets o Jwt__Key.");
@@ -118,9 +128,22 @@ builder.Services.AddSwaggerGen(c =>
     });*/
 });
 
-builder.Services.AddCors(options => options.AddPolicy("AllowReactApp", policy =>
+/*builder.Services.AddCors(options => options.AddPolicy("AllowReactApp", policy =>
     policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000")
-        .AllowAnyHeader().AllowAnyMethod() .AllowCredentials()));
+        .AllowAnyHeader().AllowAnyMethod() .AllowCredentials()));*/
+
+
+var vercelUrl = builder.Configuration["Cors:AllowedOrigin"] ?? "http://localhost:5173";
+
+builder.Services.AddCors(options => options.AddPolicy("AllowReactApp", policy =>
+    policy.WithOrigins(
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            vercelUrl)
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials()));        
 
 var app = builder.Build();
 if (app.Environment.IsDevelopment())
