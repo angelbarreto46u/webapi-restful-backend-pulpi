@@ -3,7 +3,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using webapi_restful_backend_pulpi.Data;
 using webapi_restful_backend_pulpi.DTOs;
 using webapi_restful_backend_pulpi.Models;
@@ -17,14 +16,10 @@ namespace webapi_restful_backend_pulpi.Controllers;
 public sealed class SesionesCajaController : ControllerBase
 {
     private readonly PulpiDbContext _context;
-    private readonly IServiceScopeFactory _scopeFactory;
 
-    public SesionesCajaController(
-        PulpiDbContext context,
-        IServiceScopeFactory scopeFactory)
+    public SesionesCajaController(PulpiDbContext context)
     {
         _context = context;
-        _scopeFactory = scopeFactory;
     }
 
     // ============================================================
@@ -99,30 +94,26 @@ public sealed class SesionesCajaController : ControllerBase
             });
         }
 
-        // Obtener la estrategia configurada para SQL Server.
+        // Obtener la estrategia de reintentos de SQL Server.
         var strategy =
             _context.Database.CreateExecutionStrategy();
 
-        // Toda la operación transaccional se ejecuta dentro
-        // de la estrategia de reintentos.
+        // La transacción completa se ejecuta dentro de la estrategia.
         return await strategy.ExecuteAsync<IActionResult>(
             async () =>
             {
-                // Contexto nuevo para este intento.
-                await using var scope =
-                    _scopeFactory.CreateAsyncScope();
-
-                var db = scope.ServiceProvider
-                    .GetRequiredService<PulpiDbContext>();
+                // Limpiar el seguimiento de entidades en cada intento.
+                _context.ChangeTracker.Clear();
 
                 await using var transaction =
-                    await db.Database.BeginTransactionAsync(
+                    await _context.Database.BeginTransactionAsync(
                         System.Data.IsolationLevel.Serializable);
 
-                // Evitar que el usuario tenga dos sesiones abiertas.
-                var current = await db.SesionesCaja.AnyAsync(s =>
-                    s.IdUsuarioApertura == userId &&
-                    s.Estado == "ABIERTA");
+                // Comprobar si ya existe una sesión abierta.
+                var current = await _context.SesionesCaja
+                    .AnyAsync(s =>
+                        s.IdUsuarioApertura == userId &&
+                        s.Estado == "ABIERTA");
 
                 if (current)
                 {
@@ -146,13 +137,13 @@ public sealed class SesionesCajaController : ControllerBase
                             : dto.Observaciones.Trim()
                 };
 
-                db.SesionesCaja.Add(session);
+                _context.SesionesCaja.Add(session);
 
-                await db.SaveChangesAsync();
+                await _context.SaveChangesAsync();
 
-                // Registrar auditoría dentro de la misma transacción.
+                // Registrar la apertura en la auditoría.
                 AuditoriaHelper.Registrar(
-                    db,
+                    _context,
                     userId,
                     "SesionesCaja",
                     session.IdSesionCaja,
@@ -166,15 +157,16 @@ public sealed class SesionesCajaController : ControllerBase
                         session.Observaciones
                     });
 
-                await db.SaveChangesAsync();
+                await _context.SaveChangesAsync();
 
-                // Obtener el nombre del usuario antes de confirmar.
-                await db.Entry(session)
+                // Cargar el usuario que abrió la sesión.
+                await _context.Entry(session)
                     .Reference(s => s.UsuarioApertura)
                     .LoadAsync();
 
                 var response = ToResponse(session);
 
+                // Confirmar usuario y auditoría en la misma transacción.
                 await transaction.CommitAsync();
 
                 return new OkObjectResult(response);
@@ -195,32 +187,31 @@ public sealed class SesionesCajaController : ControllerBase
 
         var isAdmin = User.IsInRole("Administrador");
 
+        // Toda la operación transaccional se ejecuta dentro
+        // de la estrategia de reintentos.
         var strategy =
             _context.Database.CreateExecutionStrategy();
 
         return await strategy.ExecuteAsync<IActionResult>(
             async () =>
             {
-                // Contexto nuevo para este intento.
-                await using var scope =
-                    _scopeFactory.CreateAsyncScope();
-
-                var db = scope.ServiceProvider
-                    .GetRequiredService<PulpiDbContext>();
+                // Empezar cada intento con un ChangeTracker limpio.
+                _context.ChangeTracker.Clear();
 
                 await using var transaction =
-                    await db.Database.BeginTransactionAsync(
+                    await _context.Database.BeginTransactionAsync(
                         System.Data.IsolationLevel.Serializable);
 
-                // Buscar una sesión abierta y comprobar permisos.
                 IQueryable<SesionCaja> sessionQuery =
-                    db.SesionesCaja
+                    _context.SesionesCaja
                         .Include(s => s.UsuarioApertura)
                         .Include(s => s.UsuarioCierre)
                         .Where(s =>
                             s.IdSesionCaja == id &&
                             s.Estado == "ABIERTA");
 
+                // Los usuarios no administradores solo pueden
+                // cerrar sus propias sesiones.
                 if (!isAdmin)
                 {
                     sessionQuery = sessionQuery.Where(
@@ -241,7 +232,7 @@ public sealed class SesionesCajaController : ControllerBase
                 }
 
                 // Obtener movimientos en efectivo registrados.
-                var movements = db.Transacciones
+                var movements = _context.Transacciones
                     .Include(t => t.Categoria)
                     .Where(t =>
                         t.IdSesionCaja == id &&
@@ -256,7 +247,7 @@ public sealed class SesionesCajaController : ControllerBase
                     .Where(t => t.Categoria!.Tipo == "Gasto")
                     .SumAsync(t => (decimal?)t.Monto) ?? 0m;
 
-                // El saldo definitivo se calcula en el servidor.
+                // El saldo esperado se calcula en el servidor.
                 var expected =
                     session.SaldoInicial + incomes - expenses;
 
@@ -277,8 +268,9 @@ public sealed class SesionesCajaController : ControllerBase
                               dto.Observaciones.Trim();
                 }
 
+                // Registrar los cambios de cierre en auditoría.
                 AuditoriaHelper.Registrar(
-                    db,
+                    _context,
                     userId,
                     "SesionesCaja",
                     session.IdSesionCaja,
@@ -293,10 +285,11 @@ public sealed class SesionesCajaController : ControllerBase
                         session.Observaciones
                     });
 
-                await db.SaveChangesAsync();
+                await _context.SaveChangesAsync();
 
-                // Consultar el nombre antes de confirmar la transacción.
-                var closingUserName = await db.Usuarios
+                // Obtener el nombre del usuario sin adjuntar
+                // una entidad adicional al ChangeTracker.
+                var closingUserName = await _context.Usuarios
                     .AsNoTracking()
                     .Where(u => u.Id == userId)
                     .Select(u => u.NombreCompleto)
@@ -304,8 +297,9 @@ public sealed class SesionesCajaController : ControllerBase
 
                 var response = ToResponse(
                     session,
-                    usuarioCierreNombre: closingUserName);
+                    closingUserName);
 
+                // Confirmar el cierre y su auditoría.
                 await transaction.CommitAsync();
 
                 return new OkObjectResult(response);
