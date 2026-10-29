@@ -1,7 +1,9 @@
+
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using webapi_restful_backend_pulpi.Data;
 using webapi_restful_backend_pulpi.DTOs;
 using webapi_restful_backend_pulpi.Models;
@@ -15,149 +17,435 @@ namespace webapi_restful_backend_pulpi.Controllers;
 public sealed class TransaccionesController : ControllerBase
 {
     private readonly PulpiDbContext _context;
-    public TransaccionesController(PulpiDbContext context) => _context = context;
+    private readonly IServiceScopeFactory _scopeFactory;
+
+    public TransaccionesController(
+        PulpiDbContext context,
+        IServiceScopeFactory scopeFactory)
+    {
+        _context = context;
+        _scopeFactory = scopeFactory;
+    }
+
+    // ============================================================
+    // LISTAR TRANSACCIONES
+    // ============================================================
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var query = _context.Transacciones.Where(t => t.Estado == "REGISTRADA").AsNoTracking();
+        var query = _context.Transacciones
+            .Where(t => t.Estado == "REGISTRADA")
+            .AsNoTracking();
+
         if (!User.IsInRole("Administrador"))
         {
-            if (!TryGetUserId(out var userId)) return Unauthorized();
-            query = query.Where(t => t.IdUsuarioRegistro == userId);
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            query = query.Where(
+                t => t.IdUsuarioRegistro == userId);
         }
-        var items = await query.Include(t => t.Categoria).Include(t => t.UsuarioRegistro)
-            .OrderByDescending(t => t.FechaMovimiento).ThenByDescending(t => t.Id)
+
+        var items = await query
+            .Include(t => t.Categoria)
+            .Include(t => t.UsuarioRegistro)
+            .OrderByDescending(t => t.FechaMovimiento)
+            .ThenByDescending(t => t.Id)
             .ToListAsync();
-        return Ok(items.Select(ToResponse));
+
+        return Ok(items.Select(t => ToResponse(t)));
     }
+
+    // ============================================================
+    // OBTENER TRANSACCIÓN POR ID
+    // ============================================================
 
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
-        var query = _context.Transacciones.Include(t => t.Categoria).Include(t => t.UsuarioRegistro)
-            .Include(t => t.SesionCaja).Where(t => t.Estado == "REGISTRADA");
+        var query = _context.Transacciones
+            .Include(t => t.Categoria)
+            .Include(t => t.UsuarioRegistro)
+            .Include(t => t.SesionCaja)
+            .Where(t => t.Estado == "REGISTRADA");
+
         if (!User.IsInRole("Administrador"))
         {
-            if (!TryGetUserId(out var userId)) return Unauthorized();
-            query = query.Where(t => t.IdUsuarioRegistro == userId);
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            query = query.Where(
+                t => t.IdUsuarioRegistro == userId);
         }
-        var transaction = await query.FirstOrDefaultAsync(t => t.Id == id);
-        return transaction is null ? NotFound(new { message = "Transacción no encontrada." }) : Ok(ToResponse(transaction));
+
+        var entity = await query.FirstOrDefaultAsync(
+            t => t.Id == id);
+
+        return entity is null
+            ? NotFound(new
+            {
+                message = "Transacción no encontrada."
+            })
+            : Ok(ToResponse(entity));
     }
 
+    // ============================================================
+    // CREAR TRANSACCIÓN
+    // ============================================================
+
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CrearTransaccionDto dto)
+    public async Task<IActionResult> Create(
+        [FromBody] CrearTransaccionDto dto)
     {
-        if (!TryGetUserId(out var userId)) return Unauthorized();
-        await using var dbTransaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var category = await _context.Categorias.FirstOrDefaultAsync(c => c.IdCategoria == dto.CategoriaId && c.Activa);
-        if (category is null) return BadRequest(new { message = "La categoría seleccionada no existe o está desactivada." });
+        if (!TryGetUserId(out var userId))
+            return Unauthorized();
+
         if (!IsTodayInNicaragua(dto.FechaMovimiento))
         {
             return BadRequest(new
             {
-                message = "La fecha de una nueva transacción debe ser la fecha actual de Nicaragua."
+                message =
+                    "La fecha de una nueva transacción debe ser " +
+                    "la fecha actual de Nicaragua."
             });
         }
 
-        var session = await _context.SesionesCaja.FirstOrDefaultAsync(s => s.IdUsuarioApertura == userId && s.Estado == "ABIERTA");
-        if (session is null) return Conflict(new { message = "Debes abrir una sesión de caja antes de registrar movimientos." });
+        var strategy =
+            _context.Database.CreateExecutionStrategy();
 
-        var transaction = new Transaccion
-        {
-            Concepto = dto.Concepto.Trim(),
-            IdCategoria = category.IdCategoria,
-            Categoria = category,
-            Monto = dto.Monto,
-            MetodoPago = dto.MetodoPago,
-            FechaMovimiento = GetNicaraguaToday(),
-            FechaRegistro = DateTime.UtcNow,
-            IdUsuarioRegistro = userId,
-            IdSesionCaja = session.IdSesionCaja,
-            Estado = "REGISTRADA"
-        };
+        return await strategy.ExecuteAsync<IActionResult>(
+            async () =>
+            {
+                // Contexto independiente para este intento.
+                await using var scope =
+                    _scopeFactory.CreateAsyncScope();
 
-        _context.Transacciones.Add(transaction);
-        await _context.SaveChangesAsync();
-        await _context.Entry(transaction).Reference(t => t.UsuarioRegistro).LoadAsync();
-        AuditoriaHelper.Registrar(_context, userId, "Transacciones", transaction.Id, "CREAR", despues: ToResponse(transaction));
-        await _context.SaveChangesAsync();
-        await dbTransaction.CommitAsync();
-        return CreatedAtAction(nameof(GetById), new { id = transaction.Id }, ToResponse(transaction));
+                var db = scope.ServiceProvider
+                    .GetRequiredService<PulpiDbContext>();
+
+                await using var dbTransaction =
+                    await db.Database.BeginTransactionAsync(
+                        System.Data.IsolationLevel.Serializable);
+
+                var category = await db.Categorias
+                    .FirstOrDefaultAsync(c =>
+                        c.IdCategoria == dto.CategoriaId &&
+                        c.Activa);
+
+                if (category is null)
+                {
+                    return new BadRequestObjectResult(new
+                    {
+                        message =
+                            "La categoría seleccionada no existe " +
+                            "o está desactivada."
+                    });
+                }
+
+                var session = await db.SesionesCaja
+                    .FirstOrDefaultAsync(s =>
+                        s.IdUsuarioApertura == userId &&
+                        s.Estado == "ABIERTA");
+
+                if (session is null)
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message =
+                            "Debes abrir una sesión de caja antes " +
+                            "de registrar movimientos."
+                    });
+                }
+
+                var entity = new Transaccion
+                {
+                    Concepto = dto.Concepto.Trim(),
+                    IdCategoria = category.IdCategoria,
+                    Categoria = category,
+                    Monto = dto.Monto,
+                    MetodoPago = dto.MetodoPago,
+                    FechaMovimiento = GetNicaraguaToday(),
+                    FechaRegistro = DateTime.UtcNow,
+                    IdUsuarioRegistro = userId,
+                    IdSesionCaja = session.IdSesionCaja,
+                    Estado = "REGISTRADA"
+                };
+
+                db.Transacciones.Add(entity);
+
+                await db.SaveChangesAsync();
+
+                await db.Entry(entity)
+                    .Reference(t => t.UsuarioRegistro)
+                    .LoadAsync();
+
+                AuditoriaHelper.Registrar(
+                    db,
+                    userId,
+                    "Transacciones",
+                    entity.Id,
+                    "CREAR",
+                    despues: ToResponse(entity));
+
+                await db.SaveChangesAsync();
+
+                var response = ToResponse(entity);
+                var entityId = entity.Id;
+
+                await dbTransaction.CommitAsync();
+
+                return new CreatedAtActionResult(
+                    nameof(GetById),
+                    null,
+                    new { id = entityId },
+                    response);
+            });
     }
+
+    // ============================================================
+    // ACTUALIZAR TRANSACCIÓN
+    // ============================================================
 
     [HttpPut("{id:long}")]
-    public async Task<IActionResult> Update(long id, [FromBody] CrearTransaccionDto dto)
+    public async Task<IActionResult> Update(
+        long id,
+        [FromBody] CrearTransaccionDto dto)
     {
-        if (!TryGetUserId(out var userId)) return Unauthorized();
-        IQueryable<Transaccion> query = _context.Transacciones.Include(t => t.Categoria).Include(t => t.UsuarioRegistro).Include(t => t.SesionCaja)
-            .Where(t => t.Estado == "REGISTRADA");
-        if (!User.IsInRole("Administrador")) query = query.Where(t => t.IdUsuarioRegistro == userId);
-        var transaction = await query.FirstOrDefaultAsync(t => t.Id == id);
-        if (transaction is null) return NotFound(new { message = "Transacción no encontrada." });
-        if (!User.IsInRole("Administrador") && transaction.IdSesionCaja != null && transaction.SesionCaja?.Estado != "ABIERTA")
-            return Conflict(new { message = "No puedes modificar un movimiento de una sesión de caja cerrada. Solicita una corrección al administrador." });
+        if (!TryGetUserId(out var userId))
+            return Unauthorized();
 
-        var category = await _context.Categorias.FirstOrDefaultAsync(c => c.IdCategoria == dto.CategoriaId && c.Activa);
-        if (category is null) return BadRequest(new { message = "La categoría seleccionada no existe o está desactivada." });
-        if (dto.FechaMovimiento.Date != transaction.FechaMovimiento.Date)
-        {
-            return BadRequest(new
+        var isAdmin = User.IsInRole("Administrador");
+
+        var strategy =
+            _context.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync<IActionResult>(
+            async () =>
             {
-                message = "La fecha de una transacción registrada no se puede modificar."
-            });
-        }
+                await using var scope =
+                    _scopeFactory.CreateAsyncScope();
 
-        await using var dbTransaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var before = ToResponse(transaction);
-        var affectedSessionId = transaction.IdSesionCaja;
-        transaction.Concepto = dto.Concepto.Trim();
-        transaction.IdCategoria = category.IdCategoria;
-        transaction.Categoria = category;
-        transaction.Monto = dto.Monto;
-        transaction.MetodoPago = dto.MetodoPago;
-        AuditoriaHelper.Registrar(_context, userId, "Transacciones", transaction.Id, "ACTUALIZAR", before, ToResponse(transaction));
-        await _context.SaveChangesAsync();
-        await RecalculateClosedSessionAsync(affectedSessionId, userId);
-        await _context.SaveChangesAsync();
-        await dbTransaction.CommitAsync();
-        return Ok(ToResponse(transaction));
+                var db = scope.ServiceProvider
+                    .GetRequiredService<PulpiDbContext>();
+
+                await using var dbTransaction =
+                    await db.Database.BeginTransactionAsync(
+                        System.Data.IsolationLevel.Serializable);
+
+                IQueryable<Transaccion> query =
+                    db.Transacciones
+                        .Include(t => t.Categoria)
+                        .Include(t => t.UsuarioRegistro)
+                        .Include(t => t.SesionCaja)
+                        .Where(t => t.Estado == "REGISTRADA");
+
+                if (!isAdmin)
+                {
+                    query = query.Where(
+                        t => t.IdUsuarioRegistro == userId);
+                }
+
+                var entity = await query.FirstOrDefaultAsync(
+                    t => t.Id == id);
+
+                if (entity is null)
+                {
+                    return new NotFoundObjectResult(new
+                    {
+                        message = "Transacción no encontrada."
+                    });
+                }
+
+                if (!isAdmin &&
+                    entity.IdSesionCaja != null &&
+                    entity.SesionCaja?.Estado != "ABIERTA")
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message =
+                            "No puedes modificar un movimiento " +
+                            "de una sesión de caja cerrada. " +
+                            "Solicita una corrección al administrador."
+                    });
+                }
+
+                var category = await db.Categorias
+                    .FirstOrDefaultAsync(c =>
+                        c.IdCategoria == dto.CategoriaId &&
+                        c.Activa);
+
+                if (category is null)
+                {
+                    return new BadRequestObjectResult(new
+                    {
+                        message =
+                            "La categoría seleccionada no existe " +
+                            "o está desactivada."
+                    });
+                }
+
+                if (dto.FechaMovimiento.Date !=
+                    entity.FechaMovimiento.Date)
+                {
+                    return new BadRequestObjectResult(new
+                    {
+                        message =
+                            "La fecha de una transacción registrada " +
+                            "no se puede modificar."
+                    });
+                }
+
+                var before = ToResponse(entity);
+                var affectedSessionId = entity.IdSesionCaja;
+
+                entity.Concepto = dto.Concepto.Trim();
+                entity.IdCategoria = category.IdCategoria;
+                entity.Categoria = category;
+                entity.Monto = dto.Monto;
+                entity.MetodoPago = dto.MetodoPago;
+
+                AuditoriaHelper.Registrar(
+                    db,
+                    userId,
+                    "Transacciones",
+                    entity.Id,
+                    "ACTUALIZAR",
+                    before,
+                    ToResponse(entity));
+
+                await db.SaveChangesAsync();
+
+                await RecalculateClosedSessionAsync(
+                    db,
+                    affectedSessionId,
+                    userId);
+
+                await db.SaveChangesAsync();
+
+                var response = ToResponse(entity);
+
+                await dbTransaction.CommitAsync();
+
+                return new OkObjectResult(response);
+            });
     }
+
+    // ============================================================
+    // ANULAR TRANSACCIÓN
+    // ============================================================
 
     [HttpDelete("{id:long}")]
-    public async Task<IActionResult> Delete(long id, [FromQuery] string? motivo = null)
+    public async Task<IActionResult> Delete(
+        long id,
+        [FromQuery] string? motivo = null)
     {
-        if (!TryGetUserId(out var userId)) return Unauthorized();
-        IQueryable<Transaccion> query = _context.Transacciones.Include(t => t.Categoria).Include(t => t.UsuarioRegistro).Include(t => t.SesionCaja)
-            .Where(t => t.Estado == "REGISTRADA");
-        if (!User.IsInRole("Administrador")) query = query.Where(t => t.IdUsuarioRegistro == userId);
-        var transaction = await query.FirstOrDefaultAsync(t => t.Id == id);
-        if (transaction is null) return NotFound(new { message = "Transacción no encontrada." });
-        if (!User.IsInRole("Administrador") && transaction.IdSesionCaja != null && transaction.SesionCaja?.Estado != "ABIERTA")
-            return Conflict(new { message = "No puedes anular un movimiento de una sesión cerrada. Solicita la corrección al administrador." });
+        if (!TryGetUserId(out var userId))
+            return Unauthorized();
 
-        await using var dbTransaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var before = ToResponse(transaction);
-        var affectedSessionId = transaction.IdSesionCaja;
-        transaction.Estado = "ANULADA";
-        AuditoriaHelper.Registrar(_context, userId, "Transacciones", transaction.Id, "ANULAR", before,
-            new { transaction.Estado }, string.IsNullOrWhiteSpace(motivo) ? "Anulación solicitada desde el sistema" : motivo);
-        await _context.SaveChangesAsync();
-        await RecalculateClosedSessionAsync(affectedSessionId, userId);
-        await _context.SaveChangesAsync();
-        await dbTransaction.CommitAsync();
-        return NoContent();
+        var isAdmin = User.IsInRole("Administrador");
+
+        var strategy =
+            _context.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync<IActionResult>(
+            async () =>
+            {
+                await using var scope =
+                    _scopeFactory.CreateAsyncScope();
+
+                var db = scope.ServiceProvider
+                    .GetRequiredService<PulpiDbContext>();
+
+                await using var dbTransaction =
+                    await db.Database.BeginTransactionAsync(
+                        System.Data.IsolationLevel.Serializable);
+
+                IQueryable<Transaccion> query =
+                    db.Transacciones
+                        .Include(t => t.Categoria)
+                        .Include(t => t.UsuarioRegistro)
+                        .Include(t => t.SesionCaja)
+                        .Where(t => t.Estado == "REGISTRADA");
+
+                if (!isAdmin)
+                {
+                    query = query.Where(
+                        t => t.IdUsuarioRegistro == userId);
+                }
+
+                var entity = await query.FirstOrDefaultAsync(
+                    t => t.Id == id);
+
+                if (entity is null)
+                {
+                    return new NotFoundObjectResult(new
+                    {
+                        message = "Transacción no encontrada."
+                    });
+                }
+
+                if (!isAdmin &&
+                    entity.IdSesionCaja != null &&
+                    entity.SesionCaja?.Estado != "ABIERTA")
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message =
+                            "No puedes anular un movimiento de una " +
+                            "sesión cerrada. Solicita la corrección " +
+                            "al administrador."
+                    });
+                }
+
+                var before = ToResponse(entity);
+                var affectedSessionId = entity.IdSesionCaja;
+
+                entity.Estado = "ANULADA";
+
+                AuditoriaHelper.Registrar(
+                    db,
+                    userId,
+                    "Transacciones",
+                    entity.Id,
+                    "ANULAR",
+                    before,
+                    new
+                    {
+                        entity.Estado
+                    },
+                    string.IsNullOrWhiteSpace(motivo)
+                        ? "Anulación solicitada desde el sistema"
+                        : motivo);
+
+                await db.SaveChangesAsync();
+
+                await RecalculateClosedSessionAsync(
+                    db,
+                    affectedSessionId,
+                    userId);
+
+                await db.SaveChangesAsync();
+
+                await dbTransaction.CommitAsync();
+
+                return new NoContentResult();
+            });
     }
 
-    private async Task RecalculateClosedSessionAsync(
-    long? sessionId,
-    int userId)
+    // ============================================================
+    // RECALCULAR SALDO DE UNA SESIÓN CERRADA
+    // ============================================================
+
+    private static async Task RecalculateClosedSessionAsync(
+        PulpiDbContext db,
+        long? sessionId,
+        int userId)
     {
         if (!sessionId.HasValue)
             return;
 
-        var session = await _context.SesionesCaja
+        var session = await db.SesionesCaja
             .FirstOrDefaultAsync(s =>
                 s.IdSesionCaja == sessionId.Value &&
                 s.Estado == "CERRADA");
@@ -170,7 +458,7 @@ public sealed class TransaccionesController : ControllerBase
             session.SaldoEsperado
         };
 
-        var cashMovements = _context.Transacciones
+        var cashMovements = db.Transacciones
             .Include(t => t.Categoria)
             .Where(t =>
                 t.IdSesionCaja == session.IdSesionCaja &&
@@ -189,7 +477,7 @@ public sealed class TransaccionesController : ControllerBase
             session.SaldoInicial + incomes - expenses;
 
         AuditoriaHelper.Registrar(
-            _context,
+            db,
             userId,
             "SesionesCaja",
             session.IdSesionCaja,
@@ -199,11 +487,21 @@ public sealed class TransaccionesController : ControllerBase
             {
                 session.SaldoEsperado
             },
-            "El administrador corrigió o anuló un movimiento de una sesión ya cerrada.");
+            "El administrador corrigió o anuló un movimiento " +
+            "de una sesión ya cerrada.");
     }
 
-    private bool TryGetUserId(out int userId) => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
-    private static bool IsValidDate(DateTime date) => date != default && date <= DateTime.UtcNow.AddDays(1);
+    // ============================================================
+    // UTILIDADES
+    // ============================================================
+
+    private bool TryGetUserId(out int userId)
+    {
+        return int.TryParse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier),
+            out userId);
+    }
+
     private static DateTime GetNicaraguaToday()
     {
         var timeZoneId = OperatingSystem.IsWindows()
@@ -214,7 +512,9 @@ public sealed class TransaccionesController : ControllerBase
             TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
 
         return TimeZoneInfo
-            .ConvertTimeFromUtc(DateTime.UtcNow, nicaraguaTimeZone)
+            .ConvertTimeFromUtc(
+                DateTime.UtcNow,
+                nicaraguaTimeZone)
             .Date;
     }
 
@@ -223,20 +523,23 @@ public sealed class TransaccionesController : ControllerBase
         return date.Date == GetNicaraguaToday();
     }
 
-    private static object ToResponse(Transaccion t) => new
+    private static object ToResponse(Transaccion t)
     {
-        idTransaccion = t.Id,
-        concepto = t.Concepto,
-        categoriaId = t.IdCategoria,
-        categoria = t.Categoria?.Nombre ?? string.Empty,
-        tipo = t.Categoria?.Tipo ?? string.Empty,
-        monto = t.Monto,
-        metodoPago = t.MetodoPago,
-        fechaMovimiento = t.FechaMovimiento,
-        fechaRegistro = t.FechaRegistro,
-        idUsuarioRegistro = t.IdUsuarioRegistro,
-        nombreUsuario = t.UsuarioRegistro?.NombreCompleto,
-        idSesionCaja = t.IdSesionCaja,
-        estado = t.Estado
-    };
+        return new
+        {
+            idTransaccion = t.Id,
+            concepto = t.Concepto,
+            categoriaId = t.IdCategoria,
+            categoria = t.Categoria?.Nombre ?? string.Empty,
+            tipo = t.Categoria?.Tipo ?? string.Empty,
+            monto = t.Monto,
+            metodoPago = t.MetodoPago,
+            fechaMovimiento = t.FechaMovimiento,
+            fechaRegistro = t.FechaRegistro,
+            idUsuarioRegistro = t.IdUsuarioRegistro,
+            nombreUsuario = t.UsuarioRegistro?.NombreCompleto,
+            idSesionCaja = t.IdSesionCaja,
+            estado = t.Estado
+        };
+    }
 }
