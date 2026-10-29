@@ -10,6 +10,7 @@ using webapi_restful_backend_pulpi.Data;
 using webapi_restful_backend_pulpi.DTOs;
 using webapi_restful_backend_pulpi.Models;
 using webapi_restful_backend_pulpi.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace webapi_restful_backend_pulpi.Controllers;
 
@@ -20,6 +21,7 @@ public sealed class AuthController : ControllerBase
     private readonly PulpiDbContext _context;
     private readonly IConfiguration _config;
     private readonly IWebHostEnvironment _environment;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     private const string AuthCookieName = "pulpi_access_token";
     private static readonly TimeSpan TokenLifetime =
@@ -28,11 +30,13 @@ public sealed class AuthController : ControllerBase
     public AuthController(
         PulpiDbContext context,
         IConfiguration config,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+    IServiceScopeFactory scopeFactory)
     {
         _context = context;
         _config = config;
         _environment = environment;
+        _scopeFactory = scopeFactory;
     }
 
     // ============================================================
@@ -82,7 +86,7 @@ public sealed class AuthController : ControllerBase
     [AllowAnonymous]
     [HttpPost("registro")]
     public async Task<ActionResult<AuthResponseDto>> Registro(
-        [FromBody] RegistroDto dto)
+    [FromBody] RegistroDto dto)
     {
         if (!string.Equals(
             dto.Password,
@@ -108,6 +112,7 @@ public sealed class AuthController : ControllerBase
         var username = dto.Username.Trim().ToLowerInvariant();
         var email = dto.Email.Trim().ToLowerInvariant();
 
+        // Verificar si el nombre de usuario ya existe.
         if (await _context.Usuarios.AnyAsync(
             u => u.Username.ToLower() == username))
         {
@@ -117,6 +122,7 @@ public sealed class AuthController : ControllerBase
             });
         }
 
+        // Verificar si el correo electrónico ya existe.
         if (await _context.Usuarios.AnyAsync(
             u => u.Email.ToLower() == email))
         {
@@ -126,6 +132,7 @@ public sealed class AuthController : ControllerBase
             });
         }
 
+        // Obtener el rol predeterminado para los registros públicos.
         var cajero = await _context.Roles
             .SingleOrDefaultAsync(r => r.Nombre == "Cajero");
 
@@ -138,42 +145,73 @@ public sealed class AuthController : ControllerBase
             });
         }
 
-        var usuario = new Usuario
+        // Generar el hash una sola vez, fuera de los posibles reintentos.
+        var passwordHash =
+            BCrypt.Net.BCrypt.HashPassword(dto.Password);
+
+        // Obtener la estrategia de ejecución configurada para SQL Server.
+        var strategy = _context.Database.CreateExecutionStrategy();
+
+        // Ejecutar toda la transacción dentro de la estrategia de reintentos.
+        var response = await strategy.ExecuteAsync(async () =>
         {
-            NombreCompleto = dto.NombreCompleto.Trim(),
-            Username = username,
-            Email = email,
-            PasswordHash =
-                BCrypt.Net.BCrypt.HashPassword(dto.Password),
-            IdRol = cajero.IdRol,
-            Rol = cajero,
-            Activo = true,
-            FechaRegistro = DateTime.UtcNow
-        };
+            // Crear un ámbito nuevo para disponer de un DbContext independiente.
+            await using var scope = _scopeFactory.CreateAsyncScope();
 
-        await using var dbTransaction =
-            await _context.Database.BeginTransactionAsync();
+            var transactionContext =
+                scope.ServiceProvider.GetRequiredService<PulpiDbContext>();
 
-        _context.Usuarios.Add(usuario);
-        await _context.SaveChangesAsync();
+            await using var dbTransaction =
+                await transactionContext.Database.BeginTransactionAsync();
 
-        AuditoriaHelper.Registrar(
-            _context,
-            usuario.Id,
-            "Usuarios",
-            usuario.Id,
-            "REGISTRO",
-            despues: new
+            // Obtener el rol desde el contexto que ejecutará la transacción.
+            var rolRegistro = await transactionContext.Roles
+                .SingleAsync(r => r.IdRol == cajero.IdRol);
+
+            var usuario = new Usuario
             {
-                usuario.Username,
-                usuario.Email,
-                Rol = cajero.Nombre
-            });
+                NombreCompleto = dto.NombreCompleto.Trim(),
+                Username = username,
+                Email = email,
+                PasswordHash = passwordHash,
+                IdRol = rolRegistro.IdRol,
+                Rol = rolRegistro,
+                Activo = true,
+                FechaRegistro = DateTime.UtcNow
+            };
 
-        await _context.SaveChangesAsync();
-        await dbTransaction.CommitAsync();
+            // Guardar el usuario.
+            transactionContext.Usuarios.Add(usuario);
 
-        var response = ToAuthResponse(usuario);
+            await transactionContext.SaveChangesAsync();
+
+            // Registrar la operación en la auditoría.
+            AuditoriaHelper.Registrar(
+                transactionContext,
+                usuario.Id,
+                "Usuarios",
+                usuario.Id,
+                "REGISTRO",
+                despues: new
+                {
+                    usuario.Username,
+                    usuario.Email,
+                    Rol = rolRegistro.Nombre
+                });
+
+            // Guardar el registro de auditoría.
+            await transactionContext.SaveChangesAsync();
+
+            // Generar la respuesta antes de confirmar la transacción.
+            var authResponse = ToAuthResponse(usuario);
+
+            // Confirmar la transacción.
+            await dbTransaction.CommitAsync();
+
+            return authResponse;
+        });
+
+        // Establecer la cookie después de completar la transacción.
         SetAuthCookie(response.Token);
 
         return Ok(response);
