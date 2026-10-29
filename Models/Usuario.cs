@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace webapi_restful_backend_pulpi.Models;
 
@@ -18,7 +19,6 @@ public sealed class Usuario
 
     [Required, MaxLength(255)]
     public string PasswordHash { get; set; } = string.Empty;
-
     public int IdRol { get; set; }
     public Rol? Rol { get; set; }
 

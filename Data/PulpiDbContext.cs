@@ -14,6 +14,7 @@ public sealed class PulpiDbContext : DbContext
     public DbSet<SesionCaja> SesionesCaja => Set<SesionCaja>();
     public DbSet<AuditoriaAccion> AuditoriaAcciones => Set<AuditoriaAccion>();
 
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
