@@ -19,7 +19,7 @@ public sealed class GuardarCategoriaDto
 
 public sealed class AbrirSesionCajaDto
 {
-    [Required, Range(typeof(decimal), "0", "9999999999999999,99", ErrorMessage = "El saldo inicial no puede ser negativo.")]
+    [Required, Range(typeof(decimal), "0", "9999999999999999.99", ErrorMessage = "El saldo inicial no puede ser negativo.")]
     public decimal? SaldoInicial { get; init; }
     [StringLength(250)]
     public string? Observaciones { get; init; }
@@ -27,7 +27,7 @@ public sealed class AbrirSesionCajaDto
 
 public sealed class CerrarSesionCajaDto
 {
-    [Required, Range(typeof(decimal), "0", "9999999999999999,99", ErrorMessage = "El efectivo contado no puede ser negativo.")]
+    [Required, Range(typeof(decimal), "0", "9999999999999999.99", ErrorMessage = "El efectivo contado no puede ser negativo.")]
     public decimal? SaldoDeclarado { get; init; }
     [StringLength(250)]
     public string? Observaciones { get; init; }

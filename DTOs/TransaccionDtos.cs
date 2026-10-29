@@ -7,7 +7,7 @@ public sealed class CrearTransaccionDto
     [Required, StringLength(150, MinimumLength = 2)]
     public string Concepto { get; init; } = string.Empty;
 
-    [Range(typeof(decimal), "0,01", "9999999999999999,99", ErrorMessage = "El monto debe ser mayor que cero.")]
+    [Range(typeof(decimal), "0.01", "9999999999999999.99", ErrorMessage = "El monto debe ser mayor que cero.")]
     public decimal Monto { get; init; }
 
     [Range(1, int.MaxValue, ErrorMessage = "Selecciona una categoría válida.")]
